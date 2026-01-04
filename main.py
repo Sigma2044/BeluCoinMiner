@@ -5,7 +5,7 @@ app = FastAPI()
 
 CLIENT_ID = "1457435375273246915"
 CLIENT_SECRET = "DEIN_SECRET_HIER"
-REDIRECT_URI = "https://miner.belucoin.pages.dev/auth/discord/callback"
+REDIRECT_URI = "https://miner.belucoin.workers.dev/callback.html"
 
 
 
