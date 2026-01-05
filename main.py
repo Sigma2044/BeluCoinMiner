@@ -49,7 +49,6 @@ def discord_callback(code: str):
         headers={"Authorization": f"Bearer {token['access_token']}"}
     ).json()
 
-    # Return Discord ID + wallet (example wallet generator)
     return {
         "discord_id": user["id"],
         "wallet": f"WALLET_{user['id'][-6:]}"
@@ -61,6 +60,45 @@ def discord_callback(code: str):
 active_sessions = {}
 SESSION_DURATION = timedelta(minutes=10)
 
+# -----------------------------
+# Active Miner Tracking
+# -----------------------------
+active_miners = {}  # discord_id -> last_share_time
+MINER_TIMEOUT = timedelta(seconds=15)
+
+# -----------------------------
+# Dynamic Difficulty
+# -----------------------------
+current_difficulty = 5
+
+def update_difficulty():
+    global current_difficulty
+    now = datetime.utcnow()
+
+    # Count active miners
+    active_count = sum(
+        1 for t in active_miners.values()
+        if now - t < MINER_TIMEOUT
+    )
+
+    # Difficulty scales with number of miners
+    current_difficulty = max(1, active_count * 5)
+
+# -----------------------------
+# Get number of active miners
+# -----------------------------
+@app.get("/api/miners")
+def get_active_miners():
+    now = datetime.utcnow()
+    count = sum(
+        1 for t in active_miners.values()
+        if now - t < MINER_TIMEOUT
+    )
+    return {"active_miners": count}
+
+# -----------------------------
+# Receive Share
+# -----------------------------
 @app.post("/api/share")
 def receive_share(data: dict):
     discord_id = data.get("discord_id", "unknown")
@@ -68,6 +106,9 @@ def receive_share(data: dict):
     share = data["share"]
 
     now = datetime.utcnow()
+
+    # Track miner activity
+    active_miners[discord_id] = now
 
     # Start new session if none exists
     if discord_id not in active_sessions:
@@ -77,6 +118,12 @@ def receive_share(data: dict):
     if now - active_sessions[discord_id] > SESSION_DURATION:
         return {"error": "session_expired"}
 
-    # Accept share
-    print("Share:", discord_id, wallet, share)
-    return {"status": "ok"}
+    # Update difficulty based on active miners
+    update_difficulty()
+
+    print("Share:", discord_id, wallet, share, "Difficulty:", current_difficulty)
+
+    return {
+        "status": "ok",
+        "difficulty": current_difficulty
+    }
