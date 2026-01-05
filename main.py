@@ -25,7 +25,6 @@ REDIRECT_URI = os.getenv("REDIRECT_URI")
 # -----------------------------
 @app.get("/auth/discord/callback")
 def discord_callback(code: str):
-    # Exchange code for access token
     token = requests.post(
         "https://discord.com/api/oauth2/token",
         data={
@@ -38,12 +37,10 @@ def discord_callback(code: str):
         headers={"Content-Type": "application/x-www-form-urlencoded"}
     ).json()
 
-    # Error handling
     if "access_token" not in token:
         print("Discord token error:", token)
         return {"error": "OAuth failed", "details": token}
 
-    # Fetch user info
     user = requests.get(
         "https://discord.com/api/users/@me",
         headers={"Authorization": f"Bearer {token['access_token']}"}
@@ -55,38 +52,29 @@ def discord_callback(code: str):
     }
 
 # -----------------------------
-# Mining Session System
+# Mining System
 # -----------------------------
-active_sessions = {}
-SESSION_DURATION = timedelta(minutes=10)
+active_sessions = {}          # discord_id -> last share time
+last_session_end = {}         # discord_id -> last session end
+SESSION_TIMEOUT = timedelta(seconds=15)
+COOLDOWN = timedelta(minutes=5)
 
-# -----------------------------
-# Active Miner Tracking
-# -----------------------------
-active_miners = {}  # discord_id -> last_share_time
+active_miners = {}            # discord_id -> last share time
 MINER_TIMEOUT = timedelta(seconds=15)
 
-# -----------------------------
-# Dynamic Difficulty
-# -----------------------------
 current_difficulty = 5
+reward_balances = {}          # discord_id -> total reward
+REWARD_FACTOR = 0.001         # reward per share * difficulty
 
 def update_difficulty():
     global current_difficulty
     now = datetime.utcnow()
-
-    # Count active miners
     active_count = sum(
         1 for t in active_miners.values()
         if now - t < MINER_TIMEOUT
     )
-
-    # Difficulty scales with number of miners
     current_difficulty = max(1, active_count * 5)
 
-# -----------------------------
-# Get number of active miners
-# -----------------------------
 @app.get("/api/miners")
 def get_active_miners():
     now = datetime.utcnow()
@@ -107,23 +95,38 @@ def receive_share(data: dict):
 
     now = datetime.utcnow()
 
+    # Cooldown check
+    if discord_id in last_session_end:
+        if now - last_session_end[discord_id] < COOLDOWN:
+            return {"error": "cooldown_active"}
+
     # Track miner activity
     active_miners[discord_id] = now
 
-    # Start new session if none exists
+    # Start new session if needed
     if discord_id not in active_sessions:
         active_sessions[discord_id] = now
 
-    # Check if session expired
-    if now - active_sessions[discord_id] > SESSION_DURATION:
+    # Session timeout (no share for 15 seconds)
+    if now - active_sessions[discord_id] > SESSION_TIMEOUT:
+        last_session_end[discord_id] = now
+        active_sessions.pop(discord_id, None)
         return {"error": "session_expired"}
 
-    # Update difficulty based on active miners
+    # Update session timestamp
+    active_sessions[discord_id] = now
+
+    # Update difficulty
     update_difficulty()
+
+    # Reward calculation
+    reward = share * current_difficulty * REWARD_FACTOR
+    reward_balances[discord_id] = reward_balances.get(discord_id, 0) + reward
 
     print("Share:", discord_id, wallet, share, "Difficulty:", current_difficulty)
 
     return {
         "status": "ok",
-        "difficulty": current_difficulty
+        "difficulty": current_difficulty,
+        "reward": reward_balances[discord_id]
     }
