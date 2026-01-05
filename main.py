@@ -63,7 +63,8 @@ active_miners = {}            # discord_id -> last share time
 MINER_TIMEOUT = timedelta(seconds=15)
 
 current_difficulty = 5
-reward_balances = {}          # discord_id -> total reward
+reward_balances = {}          # discord_id -> unclaimed reward
+wallet_balances = {}          # discord_id -> claimed balance
 REWARD_FACTOR = 0.001         # reward per share * difficulty
 
 def update_difficulty():
@@ -83,6 +84,24 @@ def get_active_miners():
         if now - t < MINER_TIMEOUT
     )
     return {"active_miners": count}
+
+@app.get("/api/balance")
+def get_balance(discord_id: str):
+    balance = wallet_balances.get(discord_id, 0)
+    return {"balance": balance}
+
+@app.post("/api/claim")
+def claim_reward(data: dict):
+    discord_id = data["discord_id"]
+
+    reward = reward_balances.get(discord_id, 0)
+    wallet_balances[discord_id] = wallet_balances.get(discord_id, 0) + reward
+    reward_balances[discord_id] = 0
+
+    return {
+        "status": "claimed",
+        "new_balance": wallet_balances[discord_id]
+    }
 
 # -----------------------------
 # Receive Share
